@@ -9,6 +9,7 @@ import {
 } from "../providers/ollama.js";
 import { validateOpenAIKey } from "../providers/openai.js";
 import { validateAnthropicKey } from "../providers/anthropic.js";
+import { validateOpenRouterKey } from "../providers/openrouter.js";
 import type { Prompter } from "./prompt.js";
 import { isInteractive, makeReadlinePrompter } from "./prompt.js";
 import { ConfigError, InstallError, ProviderError, formatError } from "../util/errors.js";
@@ -17,6 +18,7 @@ const OPTIONS = [
   "Free local LLM   — Ollama + qwen2.5:3b  (~2.6 GB download, runs offline)",
   "OpenAI API       — paste your key, uses gpt-4o-mini by default",
   "Anthropic API    — paste your key, uses claude-haiku-4-5 by default",
+  "OpenRouter       — paste your key, access 100s of models via one API",
   "Skip — factual only, no LLM",
 ] as const;
 
@@ -25,7 +27,7 @@ export interface RunPickerOptions {
   /** Suppress interactive prompts. Used in CI / piped contexts. */
   nonInteractive?: boolean;
   /** Override the default choice when --mode flag is passed. */
-  forcedMode?: "local_llm" | "openai" | "anthropic" | "factual_only";
+  forcedMode?: "local_llm" | "openai" | "anthropic" | "openrouter" | "factual_only";
   /** Write target. Defaults to ~/.continuum/config.yml. */
   configPath?: string;
   out?: NodeJS.WritableStream;
@@ -68,6 +70,9 @@ export async function runFirstRunPicker(opts: RunPickerOptions = {}): Promise<Co
         await setupAnthropic(config, prompter, out);
         break;
       case 3:
+        await setupOpenRouter(config, prompter, out);
+        break;
+      case 4:
       default:
         config.mode = "factual_only";
         out.write("Skipping LLM setup. Narrative sections will show as not-generated.\n");
@@ -88,7 +93,8 @@ function forcedToIdx(mode: NonNullable<RunPickerOptions["forcedMode"]>): number 
     case "local_llm": return 0;
     case "openai": return 1;
     case "anthropic": return 2;
-    case "factual_only": return 3;
+    case "openrouter": return 3;
+    case "factual_only": return 4;
   }
 }
 
@@ -177,6 +183,30 @@ async function setupAnthropic(
     return r;
   });
   out.write("✓ Anthropic key valid. Set ANTHROPIC_API_KEY in your shell before running `continuum`.\n");
+}
+
+async function setupOpenRouter(
+  config: Config,
+  prompter: Prompter | null,
+  out: NodeJS.WritableStream,
+): Promise<void> {
+  config.mode = "external_api";
+  config.external_api.provider = "openrouter";
+  config.external_api.base_url = "https://openrouter.ai";
+  config.external_api.api_key_env = "OPENROUTER_API_KEY";
+  config.external_api.model = "openai/gpt-4o-mini";
+
+  if (!prompter) {
+    out.write("Non-interactive: skipping key validation. Set OPENROUTER_API_KEY before running.\n");
+    return;
+  }
+
+  await validateKeyLoop(prompter, out, async (key) => {
+    const r = await validateOpenRouterKey({ apiKey: key });
+    return r;
+  });
+  out.write("✓ OpenRouter key valid. Set OPENROUTER_API_KEY in your shell before running `continuum`.\n");
+  out.write(`  Default model: ${config.external_api.model} (edit config to change).\n`);
 }
 
 async function validateKeyLoop(

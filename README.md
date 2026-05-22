@@ -13,8 +13,6 @@ continue working without losing context.
 
 ## Status
 
-All five phases scaffolded:
-
 | Phase | Surface                              | State    |
 |-------|--------------------------------------|----------|
 | 1     | `continuum snapshot`, parse/extract  | working  |
@@ -22,6 +20,9 @@ All five phases scaffolded:
 | 3     | LLM digest (Ollama / OpenAI / Anthropic) | working |
 | 4     | Daemon (`start`, `stop`, `status`)   | working  |
 | 5     | `logs`, `config`, `reinstall`        | working  |
+| 6     | `resume`, `doctor`, daemon integration | working |
+| 7     | Secret redaction, cross-agent import, `init` | working |
+| 8     | `watch`, `history`, efficient tail, OpenRouter | working |
 
 ## Install (local dev)
 
@@ -44,10 +45,13 @@ node dist/cli.js start       # watch this project in the background
 | `continuum start`                | Spawn a detached daemon watching this project               |
 | `continuum stop`                 | Stop the daemon (SIGTERM, falls back to SIGKILL after 5s)   |
 | `continuum status`               | Show PID + watched project, or "not running"                |
-| `continuum logs [-n N] [--all]`  | Tail the daemon log                                         |
+| `continuum watch`                | Foreground watcher — like `start` but stays in the terminal; Ctrl+C writes a final snapshot |
+| `continuum logs [-n N] [--all] [--follow]` | Tail the daemon log; `--follow` streams new lines in real time |
+| `continuum history [N]`          | List historical HANDOFF snapshots; `N` prints the Nth (1 = most recent) |
+| `continuum history --clear`      | Delete all HANDOFF history for this project                 |
 | `continuum config`               | Open `~/.continuum/config.yml` in $EDITOR                   |
 | `continuum reinstall`            | Re-run the provider picker                                  |
-| `continuum reinstall --mode X`   | Skip the picker (`local_llm`, `openai`, `anthropic`, `factual_only`) |
+| `continuum reinstall --mode X`   | Skip the picker (`local_llm`, `openai`, `anthropic`, `openrouter`, `factual_only`) |
 | `continuum init [--with-config]` | Add HANDOFF.md/HANDOFF.diff to .gitignore; optionally seed `.continuum/config.yml` |
 | `continuum import <file> [--from kind]` | Generate HANDOFF.md from a transcript in another tool (aider, markdown, jsonl, auto) |
 | `continuum redact [file] [--stats]` | Redact secrets from a file or stdin; prints to stdout |
@@ -65,14 +69,16 @@ Add extra patterns in `~/.continuum/config.yml` under `redact.extra_patterns`. D
 
 - **`local_llm`** — Ollama on localhost; default model `qwen2.5:3b`. continuum
   installs Ollama for you (Linux/macOS only) and pulls the model.
-- **`external_api`** — OpenAI or Anthropic. The key lives in an env var; only
-  the env var **name** is stored in config.
+- **`external_api`** — OpenAI, Anthropic, or OpenRouter. The key lives in an
+  env var; only the env var **name** is stored in config.
+  - `openrouter` provider: set `OPENROUTER_API_KEY`, default model `openai/gpt-4o-mini`.
+    Gives access to 100s of models through a single API key.
 - **`factual_only`** — no LLM at all; narrative sections show as not-generated.
 
 ## Tests
 
 ```bash
-pnpm test         # 197 tests across 31 files (incl. daemon integration test)
+pnpm test         # 223 tests across 35 files (incl. daemon integration test)
 pnpm typecheck    # strict TS, noUncheckedIndexedAccess on
 ```
 
@@ -95,5 +101,6 @@ src/
 ├── llm/                    digest, prompt builder, tolerant JSON parser
 ├── onboarding/             first-run picker, non-TTY safe
 ├── daemon/                 watcher (chokidar), pidfile, trigger engine
-└── util/                   atomic write, retry, errors, paths, logger
+├── watch/                  foreground watcher (run.ts) — same logic as daemon but in-terminal
+└── util/                   atomic write, retry, errors, paths, logger, tail
 ```

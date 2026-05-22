@@ -1,8 +1,8 @@
 import { Command } from "commander";
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { stat } from "node:fs/promises";
-import { createReadStream } from "node:fs";
+import { stat, open } from "node:fs/promises";
+import { createReadStream, watch } from "node:fs";
 import { snapshot } from "./snapshot/index.js";
 import { extractState } from "./snapshot/extract.js";
 import { claudeCodeSource } from "./sources/claude-code.js";
@@ -25,6 +25,9 @@ import { redactSessionState } from "./redact/apply.js";
 import { redactText } from "./redact/rules.js";
 import { compileExtraRules } from "./redact/config.js";
 import { runInit } from "./init/run.js";
+import { tailLines } from "./util/tail.js";
+import { listHistory, readHistoryEntry, clearHistory } from "./snapshot/history.js";
+import { runWatch } from "./watch/run.js";
 import { join } from "node:path";
 import {
   installOllama,
@@ -131,28 +134,25 @@ program
   .description("Print the daemon log (tail by default; pass --all for full)")
   .option("--all", "Print the entire log")
   .option("-n, --lines <n>", "Number of lines to print", "100")
-  .action(async (opts: { all: boolean; lines: string }) => {
+  .option("--follow", "Stream new log lines as they arrive (like tail -f)")
+  .action(async (opts: { all: boolean; lines: string; follow?: boolean }) => {
     const path = logPath();
     if (!existsSync(path)) {
       console.log("No log yet.");
       return;
     }
-    const lines = Number.parseInt(opts.lines, 10);
     if (opts.all) {
       const stream = createReadStream(path, { encoding: "utf8" });
       stream.pipe(process.stdout);
       return;
     }
-    // Read last N lines from the tail. Cheap implementation: read whole file
-    // (log rotation keeps it bounded). For very large logs this is fine
-    // until the next phase.
-    const { readFile } = await import("node:fs/promises");
-    const content = await readFile(path, "utf8");
-    const all = content.split("\n");
-    const tail = all.slice(-lines).join("\n");
-    process.stdout.write(tail);
-    if (!tail.endsWith("\n")) process.stdout.write("\n");
-    await stat(path); // touch to confirm
+    if (opts.follow) {
+      await followLog(path, Number.parseInt(opts.lines, 10));
+      return;
+    }
+    const lines = await tailLines(path, Number.parseInt(opts.lines, 10));
+    process.stdout.write(lines.join("\n"));
+    if (lines.length > 0) process.stdout.write("\n");
   });
 
 program
@@ -317,6 +317,65 @@ program
   });
 
 program
+  .command("watch")
+  .description("Foreground watcher: like `start` but stays in the terminal (Ctrl+C for final snapshot)")
+  .action(async () => {
+    try {
+      const config = await loadConfig();
+      if (!config) {
+        console.error("No config yet. Run `continuum reinstall` first.");
+        process.exit(2);
+      }
+      await runWatch({ projectRoot: process.cwd(), config });
+    } catch (err) {
+      console.error(`✗ ${formatError(err)}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command("history [index]")
+  .description("List or show historical HANDOFF snapshots for this project")
+  .option("--clear", "Delete all history entries for this project")
+  .action(async (index: string | undefined, opts: { clear?: boolean }) => {
+    try {
+      if (opts.clear) {
+        const n = await clearHistory(process.cwd());
+        console.log(n > 0 ? `✓ Removed ${n} history entry/entries.` : "Nothing to clear.");
+        return;
+      }
+      if (index !== undefined) {
+        const n = Number.parseInt(index, 10);
+        if (Number.isNaN(n) || n < 1) {
+          console.error("✗ Index must be a positive integer (1 = most recent).");
+          process.exit(2);
+        }
+        const content = await readHistoryEntry(process.cwd(), n);
+        if (!content) {
+          console.error(`✗ No history entry at index ${n}.`);
+          process.exit(1);
+        }
+        process.stdout.write(content);
+        if (!content.endsWith("\n")) process.stdout.write("\n");
+        return;
+      }
+      const entries = await listHistory(process.cwd());
+      if (entries.length === 0) {
+        console.log("No history yet for this project.");
+        return;
+      }
+      for (let i = 0; i < entries.length; i++) {
+        const e = entries[i]!;
+        console.log(`  ${i + 1}  ${e.timestamp.toISOString().replace("T", " ").slice(0, 19)} UTC  ${e.name}`);
+      }
+      console.log(`\nUse \`continuum history <index>\` to print a snapshot (1 = most recent).`);
+    } catch (err) {
+      console.error(`✗ ${formatError(err)}`);
+      process.exit(1);
+    }
+  });
+
+program
   .command("doctor")
   .description("Diagnostic checks: config, Ollama, session, daemon, log")
   .action(async () => {
@@ -331,13 +390,14 @@ program
 program
   .command("reinstall")
   .description("Re-run first-run setup (provider picker)")
-  .option("--mode <mode>", "Skip the picker: local_llm|openai|anthropic|factual_only")
+  .option("--mode <mode>", "Skip the picker: local_llm|openai|anthropic|openrouter|factual_only")
   .action(async (opts: { mode?: string }) => {
     try {
       const forced = opts.mode as
         | "local_llm"
         | "openai"
         | "anthropic"
+        | "openrouter"
         | "factual_only"
         | undefined;
       await runFirstRunPicker({ forcedMode: forced });
@@ -386,6 +446,49 @@ program.action(async () => {
     process.exit(1);
   }
 });
+
+async function followLog(filePath: string, initialLines: number): Promise<void> {
+  // Print the last N lines first, then stream new content as it arrives.
+  const initial = await tailLines(filePath, initialLines);
+  if (initial.length > 0) {
+    process.stdout.write(initial.join("\n") + "\n");
+  }
+
+  const fd = await open(filePath, "r");
+  let pos = (await fd.stat()).size;
+  await fd.close();
+
+  const watcher = watch(filePath, async (eventType) => {
+    if (eventType !== "change") return;
+    try {
+      const fd2 = await open(filePath, "r");
+      try {
+        const { size } = await fd2.stat();
+        if (size > pos) {
+          const buf = Buffer.alloc(size - pos);
+          await fd2.read(buf, 0, buf.length, pos);
+          pos = size;
+          process.stdout.write(buf.toString("utf8"));
+        } else if (size < pos) {
+          // File was rotated or truncated.
+          pos = size;
+        }
+      } finally {
+        await fd2.close();
+      }
+    } catch {
+      // Temporarily unavailable during rotation — will recover on next event.
+    }
+  });
+
+  process.on("SIGINT", () => {
+    watcher.close();
+    process.exit(0);
+  });
+
+  // Keep the process alive until the user presses Ctrl+C.
+  await new Promise<never>(() => {});
+}
 
 function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {

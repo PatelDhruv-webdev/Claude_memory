@@ -12,7 +12,7 @@ export const ConfigSchema = z.object({
     base_url: z.string().url(),
     api_key_env: z.string(),
     model: z.string(),
-    provider: z.enum(["anthropic", "openai"]),
+    provider: z.enum(["anthropic", "openai", "openrouter"]),
   }),
   triggers: z.object({
     on_error: z.boolean(),
