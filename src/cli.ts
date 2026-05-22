@@ -13,6 +13,9 @@ import { runFirstRunPicker } from "./onboarding/picker.js";
 import { spawnDaemon, stopDaemon, statusDaemon } from "./daemon/lifecycle.js";
 import { runDaemon } from "./daemon/runner.js";
 import { formatError } from "./util/errors.js";
+import { buildResume, type ResumeTarget } from "./resume/build.js";
+import { copyToClipboard } from "./resume/clipboard.js";
+import { runDoctor, formatChecks, worstStatus } from "./doctor/run.js";
 import {
   installOllama,
   isOllamaInstalled,
@@ -155,6 +158,60 @@ program
       process.env.VISUAL || process.env.EDITOR || (process.platform === "win32" ? "notepad" : "vi");
     const child = spawn(editor, [path], { stdio: "inherit" });
     child.on("close", (code) => process.exit(code ?? 0));
+  });
+
+program
+  .command("resume")
+  .description("Print a primer for pasting into the next AI agent (reads HANDOFF.md)")
+  .option(
+    "--to <target>",
+    "Target agent format: claude | codex | cursor | aider | generic",
+    "generic",
+  )
+  .option("--no-diff", "Don't include HANDOFF.diff in the primer")
+  .option("--copy", "Copy to clipboard instead of printing")
+  .action(async (opts: { to: string; diff: boolean; copy?: boolean }) => {
+    try {
+      const config = (await loadConfig()) ?? defaultConfig();
+      const valid: ResumeTarget[] = ["claude", "codex", "cursor", "aider", "generic"];
+      if (!(valid as string[]).includes(opts.to)) {
+        console.error(`✗ Unknown --to target "${opts.to}". Valid: ${valid.join(", ")}`);
+        process.exit(2);
+      }
+      const result = await buildResume({
+        projectRoot: process.cwd(),
+        target: opts.to as ResumeTarget,
+        handoffFilename: config.snapshot.handoff_filename,
+        diffFilename: config.snapshot.diff_filename,
+        includeDiff: opts.diff !== false,
+      });
+      if (opts.copy) {
+        const clip = await copyToClipboard(result.text);
+        if (clip.ok) {
+          console.error(`✓ Copied ${result.bytes} bytes to clipboard via ${clip.tool}.`);
+        } else {
+          console.error(`✗ Clipboard unavailable (${clip.error}). Printing instead.`);
+          process.stdout.write(result.text);
+        }
+      } else {
+        process.stdout.write(result.text);
+      }
+    } catch (err) {
+      console.error(`✗ ${formatError(err)}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command("doctor")
+  .description("Diagnostic checks: config, Ollama, session, daemon, log")
+  .action(async () => {
+    const checks = await runDoctor({ cwd: process.cwd() });
+    console.log(formatChecks(checks));
+    const worst = worstStatus(checks);
+    if (worst === "fail") process.exit(1);
+    if (worst === "warn") process.exit(0);
+    process.exit(0);
   });
 
 program

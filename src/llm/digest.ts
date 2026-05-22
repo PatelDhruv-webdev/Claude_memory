@@ -60,10 +60,22 @@ export async function digest(
       },
     );
     const narrative = parseNarrative(res.content);
-    if (!narrative) {
-      return { narrative: null, error: "model returned unparseable output" };
-    }
-    return { narrative };
+    if (narrative) return { narrative };
+
+    // Repair retry: small local models occasionally wrap JSON in prose or
+    // emit extra fields. Ask once more with an explicit reminder. This is
+    // cheap and catches the majority of malformed outputs from qwen2.5:3b
+    // and similar.
+    const repaired = await llm.chat({
+      system: SYSTEM_PROMPT,
+      user:
+        userPrompt +
+        "\n\nYour previous response was not valid JSON. Output ONLY the JSON object now — no markdown, no commentary, no code fences.",
+      timeoutMs,
+    });
+    const second = parseNarrative(repaired.content);
+    if (second) return { narrative: second };
+    return { narrative: null, error: "model returned unparseable output (after repair retry)" };
   } catch (err) {
     return { narrative: null, error: err instanceof ProviderError ? err.message : (err as Error).message };
   }

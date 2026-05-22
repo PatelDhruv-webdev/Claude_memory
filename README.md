@@ -38,6 +38,9 @@ node dist/cli.js start       # watch this project in the background
 |----------------------------------|-------------------------------------------------------------|
 | `continuum snapshot`             | One-shot: produce HANDOFF.md from the current session       |
 | `continuum snapshot --no-llm`    | Same, skipping the LLM digest                               |
+| `continuum resume [--to <agent>]`| Print a primer for pasting into the next agent (`claude` / `codex` / `cursor` / `aider` / `generic`) |
+| `continuum resume --copy`        | Copy the primer to the system clipboard instead of printing |
+| `continuum doctor`               | Diagnose: config, Ollama, session, daemon, log              |
 | `continuum start`                | Spawn a detached daemon watching this project               |
 | `continuum stop`                 | Stop the daemon (SIGTERM, falls back to SIGKILL after 5s)   |
 | `continuum status`               | Show PID + watched project, or "not running"                |
@@ -57,7 +60,7 @@ node dist/cli.js start       # watch this project in the background
 ## Tests
 
 ```bash
-pnpm test         # 117 tests across 19 files
+pnpm test         # 156 tests across 26 files (incl. daemon integration test)
 pnpm typecheck    # strict TS, noUncheckedIndexedAccess on
 ```
 

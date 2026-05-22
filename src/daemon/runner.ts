@@ -1,6 +1,7 @@
 import { writePid, clearPid, readLivePid } from "./pidfile.js";
 import { startWatcher, type WatcherEvent } from "./watcher.js";
 import { decide, initialState, type TriggerConfig, type TriggerState } from "./triggers.js";
+import { detectSessionEnd } from "./session-end.js";
 import { snapshot } from "../snapshot/index.js";
 import { extractState } from "../snapshot/extract.js";
 import { claudeCodeSource } from "../sources/claude-code.js";
@@ -151,25 +152,47 @@ async function maybeFireOnError(
   getInFlight: () => boolean,
   setInFlight: (b: boolean) => void,
 ): Promise<void> {
-  if (!cfg.enableError) return;
-  // Cheap heuristic: scan the tail of the file for is_error in the last KB.
-  // We don't want to re-parse the whole JSONL on every change event.
+  // Read the tail once; use it for both error detection AND session-end detection.
+  let tail: string;
   try {
     const { open } = await import("node:fs/promises");
     const fd = await open(sessionFile, "r");
     try {
       const { size } = await fd.stat();
-      const start = Math.max(0, size - 8 * 1024);
+      const start = Math.max(0, size - 16 * 1024);
       const buf = Buffer.alloc(size - start);
       await fd.read(buf, 0, buf.length, start);
-      const tail = buf.toString("utf8");
-      if (!tail.includes('"is_error":true')) return;
+      tail = buf.toString("utf8");
     } finally {
       await fd.close();
     }
   } catch {
     return;
   }
+
+  // Terminal stop reason / rate limit: fire immediately as an "error" trigger.
+  // The decision engine debounces so we won't double-fire.
+  const end = detectSessionEnd(tail);
+  if (end.ended) {
+    const d = decide(getState(), { kind: "error", at: Date.now() }, cfg);
+    setState(d.nextState);
+    if (d.fire && !getInFlight()) {
+      setInFlight(true);
+      try {
+        log.info({ event: "trigger.fire", reason: `session_end:${end.reason}` });
+        await fireSnapshot(opts, log);
+      } catch (err) {
+        log.error({ event: "snapshot.error", err: (err as Error).message });
+      } finally {
+        setInFlight(false);
+      }
+    }
+    return;
+  }
+
+  // Tool error in the last 16 KB.
+  if (!cfg.enableError) return;
+  if (!tail.includes('"is_error":true')) return;
 
   const d = decide(getState(), { kind: "error", at: Date.now() }, cfg);
   setState(d.nextState);
