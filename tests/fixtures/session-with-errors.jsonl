@@ -1,0 +1,8 @@
+{"type":"user","sessionId":"s2","timestamp":"2026-05-22T11:00:00Z","message":{"role":"user","content":"Run the tests"}}
+{"type":"assistant","sessionId":"s2","timestamp":"2026-05-22T11:00:02Z","isMeta":true,"message":{"role":"assistant","content":"internal meta event, should be filtered"}}
+{"type":"assistant","sessionId":"s2","timestamp":"2026-05-22T11:00:03Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_a","name":"Bash","input":{"command":"npm test","description":"run tests"}}],"stop_reason":"tool_use","usage":{"input_tokens":100,"output_tokens":20}}}
+{"type":"user","sessionId":"s2","timestamp":"2026-05-22T11:00:05Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_a","is_error":true,"content":"Error: command failed\nrate limit exceeded"}]}}
+{"type":"assistant","sessionId":"s2","timestamp":"2026-05-22T11:00:08Z","message":{"role":"assistant","content":"Hit a rate limit.","stop_reason":"end_turn","usage":{"input_tokens":110,"output_tokens":8}}}
+this line is not valid json and should be skipped
+{"type":"assistant","sessionId":"s2","timestamp":"2026-05-22T11:00:09Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_b","name":"Read","input":{"file_path":"/proj/package.json"}}],"stop_reason":"tool_use","usage":{"input_tokens":120,"output_tokens":15}}}
+{"type":"user","sessionId":"s2","timestamp":"2026-05-22T11:00:10Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_b","content":"{...}"}]}}
