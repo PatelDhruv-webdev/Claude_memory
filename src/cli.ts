@@ -16,6 +16,16 @@ import { formatError } from "./util/errors.js";
 import { buildResume, type ResumeTarget } from "./resume/build.js";
 import { copyToClipboard } from "./resume/clipboard.js";
 import { runDoctor, formatChecks, worstStatus } from "./doctor/run.js";
+import { importSession, type ImportKind } from "./sources/import.js";
+import { getGitInfo } from "./snapshot/git.js";
+import { render } from "./snapshot/render.js";
+import { writeFileAtomic } from "./util/atomic.js";
+import { rotateHandoff } from "./snapshot/history.js";
+import { redactSessionState } from "./redact/apply.js";
+import { redactText } from "./redact/rules.js";
+import { compileExtraRules } from "./redact/config.js";
+import { runInit } from "./init/run.js";
+import { join } from "node:path";
 import {
   installOllama,
   isOllamaInstalled,
@@ -203,6 +213,110 @@ program
   });
 
 program
+  .command("import <file>")
+  .description("Import a session transcript from another agent (aider, markdown, jsonl)")
+  .option("--from <kind>", "Source format: auto|claude-code|aider|markdown|jsonl", "auto")
+  .option("--out <dir>", "Where to write HANDOFF.md (defaults to current dir)")
+  .option("--no-llm", "Skip the LLM digest")
+  .action(async (file: string, opts: { from: string; out?: string; llm: boolean }) => {
+    try {
+      const kinds: ImportKind[] = ["auto", "claude-code", "aider", "markdown", "jsonl"];
+      if (!(kinds as string[]).includes(opts.from)) {
+        console.error(`✗ Unknown --from "${opts.from}". Valid: ${kinds.join(", ")}`);
+        process.exit(2);
+      }
+      const config = (await loadConfig()) ?? defaultConfig();
+      const events = importSession({ kind: opts.from as ImportKind, path: file });
+
+      const rawState = await extractState(events, { lastTurns: config.snapshot.last_turns });
+      const extraRules = compileExtraRules(config.redact.extra_patterns);
+      const state = config.redact.enabled
+        ? redactSessionState(rawState, { extraRules }).state
+        : rawState;
+
+      let narrative = null;
+      if (opts.llm !== false && config.mode !== "factual_only") {
+        const d = await digest(state, config);
+        narrative = d.narrative;
+        if (d.error) console.error(`(digest skipped: ${d.error})`);
+      }
+
+      const outDir = opts.out ?? process.cwd();
+      const git = await getGitInfo(outDir);
+      const md = render(state, git, narrative, {
+        generatedAt: new Date().toISOString(),
+        projectPath: outDir,
+        sourceFile: file,
+        lastTurnsCount: config.snapshot.last_turns,
+      });
+
+      const handoffPath = join(outDir, config.snapshot.handoff_filename);
+      const diffPath = join(outDir, config.snapshot.diff_filename);
+      await rotateHandoff(outDir, handoffPath, config.snapshot.keep_history);
+      const diffBody = config.redact.enabled ? redactText(git.diff, { extraRules }) : git.diff;
+      await writeFileAtomic(handoffPath, md);
+      await writeFileAtomic(diffPath, diffBody);
+      console.log(`✓ Wrote ${handoffPath}`);
+      console.log(`✓ Wrote ${diffPath}`);
+      console.log(`  Source: ${file}`);
+    } catch (err) {
+      console.error(`✗ ${formatError(err)}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command("init")
+  .description("Set up the current project for continuum (gitignore + optional config)")
+  .option("--with-config", "Also write a project-local .continuum/config.yml stub")
+  .action(async (opts: { withConfig?: boolean }) => {
+    try {
+      const config = (await loadConfig()) ?? defaultConfig();
+      const r = await runInit({
+        cwd: process.cwd(),
+        withProjectConfig: opts.withConfig === true,
+        handoffFilename: config.snapshot.handoff_filename,
+        diffFilename: config.snapshot.diff_filename,
+      });
+      for (const step of r.steps) {
+        const mark = step.status === "done" ? "✓" : "·";
+        console.log(`${mark} ${step.name}: ${step.detail ?? step.status}`);
+      }
+    } catch (err) {
+      console.error(`✗ ${formatError(err)}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command("redact [file]")
+  .description("Redact secrets from a file (or stdin if no file given); prints to stdout")
+  .option("--stats", "Print a stats summary to stderr")
+  .action(async (file: string | undefined, opts: { stats?: boolean }) => {
+    try {
+      const { redact } = await import("./redact/rules.js");
+      const config = (await loadConfig()) ?? defaultConfig();
+      const extraRules = compileExtraRules(config.redact.extra_patterns);
+
+      const { readFile: rf } = await import("node:fs/promises");
+      const input = file ? await rf(file, "utf8") : await readStdin();
+      const r = redact(input, { extraRules });
+      process.stdout.write(r.text);
+      if (opts.stats) {
+        const total = Object.values(r.stats.counts).reduce((a, b) => a + b, 0);
+        process.stderr.write(
+          `\ncontinuum: redacted ${total} secret(s), ${r.stats.bytesReplaced} bytes: ` +
+            JSON.stringify(r.stats.counts) +
+            "\n",
+        );
+      }
+    } catch (err) {
+      console.error(`✗ ${formatError(err)}`);
+      process.exit(1);
+    }
+  });
+
+program
   .command("doctor")
   .description("Diagnostic checks: config, Ollama, session, daemon, log")
   .action(async () => {
@@ -272,6 +386,15 @@ program.action(async () => {
     process.exit(1);
   }
 });
+
+function readStdin(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    process.stdin.on("data", (c) => chunks.push(c));
+    process.stdin.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    process.stdin.on("error", reject);
+  });
+}
 
 program.parseAsync(process.argv).catch((err) => {
   console.error(formatError(err));

@@ -48,6 +48,18 @@ node dist/cli.js start       # watch this project in the background
 | `continuum config`               | Open `~/.continuum/config.yml` in $EDITOR                   |
 | `continuum reinstall`            | Re-run the provider picker                                  |
 | `continuum reinstall --mode X`   | Skip the picker (`local_llm`, `openai`, `anthropic`, `factual_only`) |
+| `continuum init [--with-config]` | Add HANDOFF.md/HANDOFF.diff to .gitignore; optionally seed `.continuum/config.yml` |
+| `continuum import <file> [--from kind]` | Generate HANDOFF.md from a transcript in another tool (aider, markdown, jsonl, auto) |
+| `continuum redact [file] [--stats]` | Redact secrets from a file or stdin; prints to stdout |
+
+## Secret redaction
+
+Built in. Pattern-based detection of OpenAI / Anthropic / GitHub / AWS / Google / Slack / Stripe keys, JWTs, private-key PEM blocks, and env-var-style secret assignments. Applied:
+
+- before the session is sent to the LLM
+- before HANDOFF.md and HANDOFF.diff are written
+
+Add extra patterns in `~/.continuum/config.yml` under `redact.extra_patterns`. Disable entirely with `redact.enabled: false`.
 
 ## Provider modes
 
@@ -60,7 +72,7 @@ node dist/cli.js start       # watch this project in the background
 ## Tests
 
 ```bash
-pnpm test         # 156 tests across 26 files (incl. daemon integration test)
+pnpm test         # 197 tests across 31 files (incl. daemon integration test)
 pnpm typecheck    # strict TS, noUncheckedIndexedAccess on
 ```
 

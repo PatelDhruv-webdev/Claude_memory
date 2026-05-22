@@ -5,6 +5,8 @@ import { withRetry } from "../util/retry.js";
 import { makeClient, type LlmClient } from "./client.js";
 import { parseNarrative } from "./parse.js";
 import { SYSTEM_PROMPT, buildUserPrompt } from "./prompt.js";
+import { redactSessionState } from "../redact/apply.js";
+import { compileExtraRules } from "../redact/config.js";
 
 export interface DigestResult {
   narrative: NarrativeSections | null;
@@ -42,7 +44,11 @@ export async function digest(
     return { narrative: null, error: (err as Error).message };
   }
 
-  const userPrompt = buildUserPrompt(state);
+  // Redact secrets before they leave the machine.
+  const redacted = config.redact.enabled
+    ? redactSessionState(state, { extraRules: compileExtraRules(config.redact.extra_patterns) }).state
+    : state;
+  const userPrompt = buildUserPrompt(redacted);
   const timeoutMs =
     config.mode === "local_llm" ? config.local_llm.timeout_seconds * 1000 : 60_000;
 

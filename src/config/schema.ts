@@ -29,6 +29,14 @@ export const ConfigSchema = z.object({
   watch: z.object({
     project_root: z.string(),
   }),
+  redact: z.object({
+    enabled: z.boolean(),
+    /** Extra regex patterns merged with the built-in rule set. */
+    extra_patterns: z.array(z.object({
+      name: z.string(),
+      pattern: z.string(),
+    })),
+  }).default({ enabled: true, extra_patterns: [] }),
   log_level: z.enum(["debug", "info", "warn", "error"]),
 });
 
@@ -62,6 +70,10 @@ export const DEFAULT_CONFIG: Config = {
   },
   watch: {
     project_root: "auto",
+  },
+  redact: {
+    enabled: true,
+    extra_patterns: [],
   },
   log_level: "info",
 };
