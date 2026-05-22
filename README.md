@@ -13,37 +13,72 @@ continue working without losing context.
 
 ## Status
 
-**Phase 1 — snapshot module.** `continuum snapshot` works end-to-end and
-produces a populated `HANDOFF.md`. The three LLM narrative sections show a
-`_(not generated)_` placeholder until Phase 3.
+All five phases scaffolded:
 
-Daemon, provider picker (Ollama / OpenAI / Anthropic), and LLM digest are not
-yet wired — see `/root/.claude/plans/continuum-build-happy-hopper.md` for the
-full build plan.
+| Phase | Surface                              | State    |
+|-------|--------------------------------------|----------|
+| 1     | `continuum snapshot`, parse/extract  | working  |
+| 2     | First-run picker, Ollama install     | working  |
+| 3     | LLM digest (Ollama / OpenAI / Anthropic) | working |
+| 4     | Daemon (`start`, `stop`, `status`)   | working  |
+| 5     | `logs`, `config`, `reinstall`        | working  |
 
 ## Install (local dev)
 
 ```bash
 pnpm install
 pnpm build
-node dist/cli.js snapshot
+node dist/cli.js reinstall   # first-run picker
+node dist/cli.js start       # watch this project in the background
 ```
 
 ## Commands
 
-| Command               | Status                  |
-|-----------------------|-------------------------|
-| `continuum snapshot`  | working                 |
-| `continuum`           | one-shot snapshot (Phase 1); daemon in Phase 4 |
-| `continuum start`     | Phase 4                 |
-| `continuum stop`      | Phase 4                 |
-| `continuum status`    | Phase 4                 |
-| `continuum logs`      | Phase 4                 |
-| `continuum config`    | Phase 2                 |
-| `continuum reinstall` | Phase 2                 |
+| Command                          | What it does                                                |
+|----------------------------------|-------------------------------------------------------------|
+| `continuum snapshot`             | One-shot: produce HANDOFF.md from the current session       |
+| `continuum snapshot --no-llm`    | Same, skipping the LLM digest                               |
+| `continuum start`                | Spawn a detached daemon watching this project               |
+| `continuum stop`                 | Stop the daemon (SIGTERM, falls back to SIGKILL after 5s)   |
+| `continuum status`               | Show PID + watched project, or "not running"                |
+| `continuum logs [-n N] [--all]`  | Tail the daemon log                                         |
+| `continuum config`               | Open `~/.continuum/config.yml` in $EDITOR                   |
+| `continuum reinstall`            | Re-run the provider picker                                  |
+| `continuum reinstall --mode X`   | Skip the picker (`local_llm`, `openai`, `anthropic`, `factual_only`) |
+
+## Provider modes
+
+- **`local_llm`** — Ollama on localhost; default model `qwen2.5:3b`. continuum
+  installs Ollama for you (Linux/macOS only) and pulls the model.
+- **`external_api`** — OpenAI or Anthropic. The key lives in an env var; only
+  the env var **name** is stored in config.
+- **`factual_only`** — no LLM at all; narrative sections show as not-generated.
 
 ## Tests
 
 ```bash
-pnpm test
+pnpm test         # 117 tests across 19 files
+pnpm typecheck    # strict TS, noUncheckedIndexedAccess on
+```
+
+## Architecture
+
+```
+src/
+├── cli.ts                  commander wiring
+├── snapshot/               session JSONL → HANDOFF.md
+│   ├── discover.ts         find newest non-agent .jsonl for cwd
+│   ├── parse.ts            streaming JSONL → RawEvent
+│   ├── extract.ts          RawEvent → SessionState (single fold)
+│   ├── git.ts              execFile-based, never shell
+│   ├── render.ts           SessionState → markdown
+│   ├── history.ts          rotate previous HANDOFF into ~/.continuum/history
+│   └── index.ts            orchestrator (atomic writes)
+├── sources/claude-code.ts  SourceAdapter (Codex/Cursor seam)
+├── config/{schema,io}.ts   YAML + zod, atomic writes, broken-file backup
+├── providers/              Ollama install/pull + API key validators
+├── llm/                    digest, prompt builder, tolerant JSON parser
+├── onboarding/             first-run picker, non-TTY safe
+├── daemon/                 watcher (chokidar), pidfile, trigger engine
+└── util/                   atomic write, retry, errors, paths, logger
 ```
