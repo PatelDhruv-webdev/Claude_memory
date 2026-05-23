@@ -28,6 +28,7 @@ import { runInit } from "./init/run.js";
 import { tailLines } from "./util/tail.js";
 import { listHistory, readHistoryEntry, clearHistory } from "./snapshot/history.js";
 import { runWatch } from "./watch/run.js";
+import { runDashboard } from "./tui/dashboard.js";
 import { join } from "node:path";
 import {
   installOllama,
@@ -327,6 +328,19 @@ program
         process.exit(2);
       }
       await runWatch({ projectRoot: process.cwd(), config });
+    } catch (err) {
+      console.error(`✗ ${formatError(err)}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command("ui")
+  .description("Live terminal dashboard — daemon status, session info, log tail. Press q to quit")
+  .action(async () => {
+    try {
+      const config = (await loadConfig()) ?? defaultConfig();
+      await runDashboard({ projectRoot: process.cwd(), config });
     } catch (err) {
       console.error(`✗ ${formatError(err)}`);
       process.exit(1);

@@ -1,7 +1,7 @@
 {
-  "name": "continuum",
+  "name": "continuum-handoff",
   "version": "0.1.0",
-  "description": "Automatic session-handoff daemon for AI coding agents",
+  "description": "Automatic session-handoff daemon for AI coding agents — watches Claude Code and writes HANDOFF.md when your session ends",
   "type": "module",
   "bin": {
     "continuum": "./dist/cli.js"
@@ -14,12 +14,37 @@
   "engines": {
     "node": ">=20"
   },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "ai",
+    "llm",
+    "handoff",
+    "session",
+    "daemon",
+    "codex",
+    "cursor",
+    "aider",
+    "continuum",
+    "context"
+  ],
+  "author": "Dhruv Patel <dhruv3415@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PatelDhruv-webdev/Claude_memory.git"
+  },
+  "homepage": "https://github.com/PatelDhruv-webdev/Claude_memory#readme",
+  "bugs": {
+    "url": "https://github.com/PatelDhruv-webdev/Claude_memory/issues"
+  },
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm run typecheck && pnpm run build && pnpm run test"
   },
   "dependencies": {
     "chokidar": "^5.0.0",

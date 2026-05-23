@@ -23,9 +23,18 @@ continue working without losing context.
 | 6     | `resume`, `doctor`, daemon integration | working |
 | 7     | Secret redaction, cross-agent import, `init` | working |
 | 8     | `watch`, `history`, efficient tail, OpenRouter | working |
+| 9     | `continuum ui` TUI dashboard, npm publish setup | working |
 
-## Install (local dev)
+## Install
 
+**From npm (once published):**
+```bash
+npm install -g continuum-handoff
+continuum reinstall   # first-run setup
+continuum start       # start watching
+```
+
+**Local dev:**
 ```bash
 pnpm install
 pnpm build
@@ -45,6 +54,7 @@ node dist/cli.js start       # watch this project in the background
 | `continuum start`                | Spawn a detached daemon watching this project               |
 | `continuum stop`                 | Stop the daemon (SIGTERM, falls back to SIGKILL after 5s)   |
 | `continuum status`               | Show PID + watched project, or "not running"                |
+| `continuum ui`                   | Live terminal dashboard — daemon status, session metrics, log tail. Press q to quit |
 | `continuum watch`                | Foreground watcher — like `start` but stays in the terminal; Ctrl+C writes a final snapshot |
 | `continuum logs [-n N] [--all] [--follow]` | Tail the daemon log; `--follow` streams new lines in real time |
 | `continuum history [N]`          | List historical HANDOFF snapshots; `N` prints the Nth (1 = most recent) |
@@ -78,7 +88,7 @@ Add extra patterns in `~/.continuum/config.yml` under `redact.extra_patterns`. D
 ## Tests
 
 ```bash
-pnpm test         # 223 tests across 35 files (incl. daemon integration test)
+pnpm test         # 245 tests across 36 files (incl. daemon integration test)
 pnpm typecheck    # strict TS, noUncheckedIndexedAccess on
 ```
 
